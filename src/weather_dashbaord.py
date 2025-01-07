@@ -4,38 +4,41 @@ import boto3
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
+import time
 
-# Load environment variables from the src directory
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
-
-# Ensure the AWS_BUCKET_NAME is loaded
-bucket_name = os.getenv('AWS_BUCKET_NAME')
-if not bucket_name:
-    raise ValueError("AWS_BUCKET_NAME environment variable is not set or is empty.")
+# Load environment variables
+load_dotenv()
 
 class WeatherDashboard:
     def __init__(self):
         self.api_key = os.getenv('OPENWEATHER_API_KEY')
-        self.bucket_name = bucket_name
-        self.s3_client = boto3.client('s3')
+        self.bucket_name = os.getenv('AWS_BUCKET_NAME')
+        self.region = 'us-east-1'  # Adjust region if necessary
+        self.s3_client = boto3.client('s3', region_name=self.region)
 
     def create_bucket_if_not_exists(self):
         """Create S3 bucket if it doesn't exist"""
         try:
+            # Attempt to check the bucket's existence
             self.s3_client.head_bucket(Bucket=self.bucket_name)
             print(f"Bucket {self.bucket_name} exists")
-        except:
-            print(f"Creating bucket {self.bucket_name}")
-            try:
-                # Simpler creation for us-east-1
-                self.s3_client.create_bucket(Bucket=self.bucket_name)
+        except self.s3_client.exceptions.ClientError as e:
+            # If the bucket does not exist, create it
+            if e.response['Error']['Code'] == 'NoSuchBucket':
+                print(f"Bucket {self.bucket_name} does not exist. Creating it now.")
+                self.s3_client.create_bucket(
+                    Bucket=self.bucket_name,
+                    CreateBucketConfiguration={'LocationConstraint': self.region}  # Ensure region is passed here
+                )
+                # Add a delay to ensure the bucket is fully created and accessible
                 print(f"Successfully created bucket {self.bucket_name}")
-            except Exception as e:
-                print(f"Error creating bucket: {e}")
+                time.sleep(5)  # Wait for a short period before trying to use the bucket
+            else:
+                print(f"Error checking bucket existence: {e}")
 
     def fetch_weather(self, city):
         """Fetch weather data from OpenWeather API"""
-        base_url = "http://api.openweathermap.org/data/2.5/weather"
+        base_url = "https://api.openweathermap.org/data/2.5/weather"
         params = {
             "q": city,
             "appid": self.api_key,
@@ -44,7 +47,7 @@ class WeatherDashboard:
         
         try:
             response = requests.get(base_url, params=params)
-            response.raise_for_status()
+            response.raise_for_status()  # Will raise an HTTPError for bad responses
             return response.json()
         except requests.exceptions.RequestException as e:
             print(f"Error fetching weather data: {e}")
@@ -78,7 +81,7 @@ def main():
     # Create bucket if needed
     dashboard.create_bucket_if_not_exists()
     
-    cities = ["Philadelphia", "Seattle", "New York"]
+    cities = ["Bowie", "Baltimore", "New York"]
     
     for city in cities:
         print(f"\nFetching weather for {city}...")
